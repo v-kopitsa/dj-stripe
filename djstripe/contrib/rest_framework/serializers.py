@@ -37,3 +37,13 @@ class CreateSubscriptionSerializer(serializers.Serializer):
         max_digits=5,
         decimal_places=2,
     )
+
+
+class CreateChargeSerializer(serializers.Serializer):
+    """A serializer used to create a customer charge."""
+
+    stripe_token = serializers.CharField(max_length=200)
+    amount = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+    )
