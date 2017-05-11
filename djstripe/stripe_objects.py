@@ -21,7 +21,9 @@ dj-stripe functionality.
 from copy import deepcopy
 import decimal
 import sys
+import base64
 
+from cryptography.fernet import Fernet
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import dateformat, six, timezone
@@ -37,7 +39,7 @@ from .fields import (
     StripeBooleanField, StripeCharField, StripeCurrencyField, StripeDateTimeField,
     StripeFieldMixin, StripeIdField, StripeIntegerField, StripeJSONField,
     StripeNullBooleanField, StripePercentField, StripePositiveIntegerField,
-    StripeTextField
+    StripeTextField, StripeEmailField
 )
 from .managers import StripeObjectManager
 
@@ -1083,13 +1085,82 @@ Fields not implemented:
 # ============================================================================ #
 
 class StripeAccount(StripeObject):
-
+    """
+This is an object representing your Stripe account. You can retrieve it to see
+properties on the account like its current e-mail address or if the account is
+enabled yet to make live charges. (Source: https://stripe.com/docs/api#account)
+    """
     class Meta:
         abstract = True
 
     stripe_class = stripe.Account
 
-    # Account -- add_card(external_account);
+    country = StripeCharField(
+        max_length=255,
+        help_text="The country of the account."
+    )
+    # default_currency =
+    currency = StripeCharField(
+        max_length=3,
+        help_text="Three-letter ISO currency code."
+    )
+    display_name = StripeCharField(
+        max_length=255,
+        blank=True,
+        help_text="The display name for this account. This is used on the "
+                  "Stripe dashboard to help you differentiate between accounts."
+    )
+    email = StripeEmailField(
+        max_length=255,
+        blank=True,
+        help_text="The primary user’s email address."
+    )
+    managed = StripeBooleanField(
+        default=False,
+        help_text="Whether or not the account is managed by your platform. ."
+    )
+    legal_entity = StripeJSONField(
+        blank=True,
+        help_text="Information regarding the owner of this account, including "
+                  "verification status."
+    )
+    external_accounts = StripeJSONField(
+        blank=True,
+        help_text="External accounts (bank accounts and/or cards) currently "
+                  "attached to this account."
+    )
+    public_key = StripeCharField(max_length=255, blank=True)
+    _private_key = StripeCharField(max_length=255, blank=True)
+
+    @staticmethod
+    def _get_encryption_key():
+        if hasattr(djstripe_settings, 'STRIPE_ENCRYPTION_KEY'):
+            key = djstripe_settings.STRIPE_ENCRYPTION_KEY
+        else:
+            key = djstripe_settings.STRIPE_SECRET_KEY
+        return base64.b64encode(bytes(key, encoding="UTF-8"))
+
+    @property
+    def private_key(self):
+        key = self._get_encryption_key()
+        cipher_suite = Fernet(key)
+        return cipher_suite.decrypt(bytes(self._private_key, encoding="UTF-8"))
+
+    def add_private_key(self, value):
+        key = self._get_encryption_key()
+        encoding = {"encoding": "UTF-8"}
+        cipher_suite = Fernet(key)
+        self._private_key = str(
+            cipher_suite.encrypt(bytes(value, **encoding)), **encoding)
+
+    def add_card(self, external_account):
+        account = self.stripe_class.retrieve(self.stripe_id)
+        account.external_accounts.create(external_account=external_account)
+
+        stripe_account = self.api_retrieve()
+        self.external_accounts = stripe_account['external_accounts']
+        self.legal_entity = stripe_account['legal_entity']
+        self.save()
 
     @classmethod
     def get_connected_account_from_token(cls, access_token):
@@ -1099,7 +1170,8 @@ class StripeAccount(StripeObject):
 
     @classmethod
     def get_default_account(cls):
-        account_data = cls.stripe_class.retrieve(api_key=djstripe_settings.STRIPE_SECRET_KEY)
+        account_data = cls.stripe_class.retrieve(
+            api_key=djstripe_settings.STRIPE_SECRET_KEY)
 
         return cls._get_or_create_from_stripe_object(account_data)[0]
 

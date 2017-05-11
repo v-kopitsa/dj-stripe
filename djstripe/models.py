@@ -604,7 +604,37 @@ class Transfer(StripeTransfer):
 # ============================================================================ #
 
 class Account(StripeAccount):
-    pass
+
+    @classmethod
+    def get_or_create(cls, **kwargs):
+        """ Get or create a Account."""
+
+        try:
+            return Account.objects.get(stripe_id=kwargs['stripe_id']), False
+        except Account.DoesNotExist:
+            return cls.create(**kwargs), True
+
+    @classmethod
+    def create(cls, **kwargs):
+        stripe_account = cls._api_create(**kwargs)
+        account, _ = Account.objects.get_or_create(
+            stripe_id=stripe_account['id'],
+            defaults={
+                "country": stripe_account["country"],
+                "currency": stripe_account["default_currency"],
+                "display_name": stripe_account["display_name"] or "",
+                "email": stripe_account["email"] or "",
+                "managed": stripe_account["managed"],
+                "legal_entity": stripe_account["legal_entity"],
+                "external_accounts": stripe_account["external_accounts"],
+                "public_key": stripe_account["keys"]["publishable"]
+            }
+        )
+        # store the secret encrypted
+        account.add_private_key(stripe_account["keys"]["secret"])
+        account.save()
+
+        return account
 
 
 # ============================================================================ #
