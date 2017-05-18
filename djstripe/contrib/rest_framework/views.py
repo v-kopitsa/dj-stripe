@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from stripe.error import InvalidRequestError
 
 from ...models import Customer
 from ...settings import subscriber_request_callback, CANCELLATION_AT_PERIOD_END
@@ -58,15 +59,12 @@ class SubscriptionRestView(APIView):
                 customer.add_card(serializer.data["stripe_token"])
                 customer.subscribe(
                     serializer.data["plan"],
+                    serializer.data["account"],
                     serializer.data.get("charge_immediately", True)
                 )
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
-            except:
-                # TODO: Better error messages
-                return Response(
-                    "Something went wrong processing the payment.",
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            except InvalidRequestError as e:
+                return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

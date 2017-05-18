@@ -332,12 +332,16 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
             return subscriptions.first()
 
     # TODO: Accept a coupon object when coupons are implemented
-    def subscribe(self, plan, charge_immediately=True, **kwargs):
+    def subscribe(self, plan, account=None, charge_immediately=True, **kwargs):
         # Convert Plan to stripe_id
         if isinstance(plan, Plan):
             plan = plan.stripe_id
+        # Convert Account to stripe_id
+        if isinstance(account, Account):
+            account = account.stripe_id
 
-        stripe_subscription = super(Customer, self).subscribe(plan=plan, **kwargs)
+        stripe_subscription = super(Customer, self).subscribe(
+            plan=plan, account=account, **kwargs)
 
         if charge_immediately:
             self.send_invoice()
@@ -941,7 +945,12 @@ class Plan(StripePlan):
 class Subscription(StripeSubscription):
     __doc__ = getattr(StripeSubscription, "__doc__")
 
-    # account = ForeignKey("Account", related_name="subscriptions")
+    account = ForeignKey(
+        "Account",
+        related_name="subscriptions",
+        help_text="The account associated with this subscription.",
+        null=True
+    )
     customer = ForeignKey(
         "Customer", on_delete=models.CASCADE,
         related_name="subscriptions",
@@ -975,10 +984,14 @@ class Subscription(StripeSubscription):
         subscription is temporarily current.
         """
 
-        return self.canceled_at and self.start < self.canceled_at and self.cancel_at_period_end
+        return (self.canceled_at and self.start < self.canceled_at and
+                self.cancel_at_period_end)
 
     def is_valid(self):
-        """ Returns True if this subscription's status and period are current, false otherwise."""
+        """
+        Returns True if this subscription's status and period are current,
+        false otherwise.
+        """
 
         if not self.is_status_current():
             return False
@@ -992,26 +1005,37 @@ class Subscription(StripeSubscription):
         # Convert Plan to stripe_id
         if "plan" in kwargs and isinstance(kwargs["plan"], Plan):
             kwargs.update({"plan": kwargs["plan"].stripe_id})
+        # Convert Account to stripe_id
+        if "account" in kwargs and isinstance(kwargs["account"], Account):
+            kwargs.update({"stripe_account": kwargs["account"].stripe_id})
 
-        stripe_subscription = super(Subscription, self).update(prorate=prorate, **kwargs)
+        stripe_subscription = super(
+            Subscription, self).update(prorate=prorate, **kwargs)
         return Subscription.sync_from_stripe_data(stripe_subscription)
 
     def extend(self, delta):
         stripe_subscription = super(Subscription, self).extend(delta)
         return Subscription.sync_from_stripe_data(stripe_subscription)
 
-    def cancel(self, at_period_end=djstripe_settings.CANCELLATION_AT_PERIOD_END):
-        # If plan has trial days and customer cancels before trial period ends, then end subscription now,
-        #     i.e. at_period_end=False
+    def cancel(self,
+               at_period_end=djstripe_settings.CANCELLATION_AT_PERIOD_END):
+        # If plan has trial days and customer cancels before trial period ends,
+        # then end subscription now, i.e. at_period_end=False
         if self.trial_end and self.trial_end > timezone.now():
             at_period_end = False
 
-        stripe_subscription = super(Subscription, self).cancel(at_period_end=at_period_end)
+        stripe_subscription = super(Subscription, self).cancel(
+            at_period_end=at_period_end)
         return Subscription.sync_from_stripe_data(stripe_subscription)
 
     def _attach_objects_hook(self, cls, data):
-        self.customer = cls._stripe_object_to_customer(target_cls=Customer, data=data)
-        self.plan = cls._stripe_object_to_plan(target_cls=Plan, data=data)
+        self.customer = cls._stripe_object_to_customer(
+            target_cls=Customer, data=data)
+        self.plan = cls._stripe_object_to_plan(
+            target_cls=Plan, data=data)
+        if self.account:
+            self.account = cls._stripe_object_to_account(
+                target_cls=Account, data=data)
 
 
 # ============================================================================ #
