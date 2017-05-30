@@ -664,8 +664,9 @@ Fields not implemented:
     )
     shipping = StripeJSONField(null=True, help_text="Shipping information associated with the customer.")
 
-    def subscribe(self, plan, application_fee_percent=None, coupon=None, quantity=None, metadata=None,
-                  tax_percent=None, trial_end=None):
+    def subscribe(self, plan, account=None, application_fee_percent=None,
+                  coupon=None, quantity=None, metadata=None, tax_percent=None,
+                  trial_end=None):
         """
         Subscribes this customer to a plan.
 
@@ -712,6 +713,7 @@ Fields not implemented:
 
         stripe_subscription = StripeSubscription._api_create(
             plan=plan,
+            stripe_account=account,
             customer=self.stripe_id,
             application_fee_percent=application_fee_percent,
             coupon=coupon,
@@ -1898,6 +1900,20 @@ Fields not implemented:
         """
 
         return target_cls._get_or_create_from_stripe_object(data["plan"])[0]
+
+    @classmethod
+    def _stripe_object_to_account(cls, target_cls, data):
+        """
+        Search the given manager for the Plan matching this StripeCharge object's ``plan`` field.
+        Note that the plan field is already expanded in each request and is required.
+
+        :param target_cls: The target class
+        :type target_cls: StripePlan
+        :param data: stripe object
+        :type data: dict
+
+        """
+        return target_cls._get_or_create_from_stripe_object(data["account"])[0]
 
     def update(self, plan=None, application_fee_percent=None, coupon=None, prorate=None, proration_date=None,
                metadata=None, quantity=None, tax_percent=None, trial_end=None):
