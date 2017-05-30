@@ -39,6 +39,12 @@ class CreateSubscriptionSerializer(serializers.Serializer):
     )
 
 
+class DeleteSubscriptionSerializer(serializers.Serializer):
+    """A serializer used to create a Subscription."""
+
+    plan = serializers.CharField(max_length=50, required=False)
+
+
 class CreateChargeSerializer(serializers.Serializer):
     """A serializer used to create a customer charge."""
 

@@ -18,7 +18,8 @@ from rest_framework.views import APIView
 from ...models import Customer
 from ...settings import subscriber_request_callback, CANCELLATION_AT_PERIOD_END
 from .serializers import (
-    SubscriptionSerializer, CreateSubscriptionSerializer, CreateChargeSerializer
+    SubscriptionSerializer, CreateSubscriptionSerializer,
+    CreateChargeSerializer, DeleteSubscriptionSerializer
 )
 
 
@@ -76,16 +77,27 @@ class SubscriptionRestView(APIView):
 
         Returns with status code 204.
         """
-        try:
+
+        serializer = DeleteSubscriptionSerializer(data=request.data)
+
+        if serializer.is_valid():
             customer, _created = Customer.get_or_create(
                 subscriber=subscriber_request_callback(self.request))
-            customer.subscription.cancel(
-                at_period_end=CANCELLATION_AT_PERIOD_END)
+            if "plan" in serializer.data:
+                subscription = customer.subscriptions.filter(
+                    plan__stripe_id=serializer.data["plan"]).first()
+            else:
+                subscription = customer.subscription
 
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        except:
-            return Response("Something went wrong cancelling the subscription.",
-                            status=status.HTTP_400_BAD_REQUEST)
+            try:
+                subscription.cancel(at_period_end=CANCELLATION_AT_PERIOD_END)
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            except:
+                return Response(
+                    "Something went wrong cancelling the subscription.",
+                    status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class ChargeRestView(APIView):
