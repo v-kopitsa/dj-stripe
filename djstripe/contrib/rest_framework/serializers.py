@@ -30,8 +30,9 @@ class CreateSubscriptionSerializer(serializers.Serializer):
     """A serializer used to create a Subscription."""
 
     stripe_token = serializers.CharField(max_length=200)
+    api_key = serializers.CharField(max_length=200, required=False)
     plan = serializers.CharField(max_length=50)
-    account = serializers.CharField(max_length=100)
+    account = serializers.CharField(max_length=100, required=False)
     charge_immediately = serializers.NullBooleanField(required=False)
     tax_percent = serializers.DecimalField(
         required=False,
@@ -50,6 +51,7 @@ class CreateChargeSerializer(serializers.Serializer):
     """A serializer used to create a customer charge."""
 
     stripe_token = serializers.CharField(max_length=200)
+    api_key = serializers.CharField(max_length=200, required=False)
     amount = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,

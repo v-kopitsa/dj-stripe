@@ -666,7 +666,7 @@ Fields not implemented:
 
     def subscribe(self, plan, account=None, application_fee_percent=None,
                   coupon=None, quantity=None, metadata=None, tax_percent=None,
-                  trial_end=None):
+                  trial_end=None, api_key=None):
         """
         Subscribes this customer to a plan.
 
@@ -710,7 +710,7 @@ Fields not implemented:
         .. if you're using ``StripeCustomer.subscribe()`` instead of ``Customer.subscribe()``, ``plan`` \
         can only be a string
         """
-
+        api_key = api_key or self.default_api_key
         stripe_subscription = StripeSubscription._api_create(
             plan=plan,
             stripe_account=account,
@@ -721,12 +721,13 @@ Fields not implemented:
             metadata=metadata,
             tax_percent=tax_percent,
             trial_end=trial_end,
+            api_key=api_key,
         )
 
         return stripe_subscription
 
     def charge(self, amount, currency, application_fee=None, capture=None, description=None, destination=None,
-               metadata=None, shipping=None, source=None, statement_descriptor=None):
+               metadata=None, shipping=None, source=None, statement_descriptor=None, api_key=None):
         """
         Creates a charge for this customer.
 
@@ -769,6 +770,7 @@ Fields not implemented:
         if source and isinstance(source, StripeSource):
             source = source.stripe_id
 
+        api_key = api_key or self.default_api_key
         stripe_charge = StripeCharge._api_create(
             amount=int(amount * 100),  # Convert dollars into cents
             currency=currency,
@@ -781,6 +783,7 @@ Fields not implemented:
             customer=self.stripe_id,
             source=source,
             statement_descriptor=statement_descriptor,
+            api_key=api_key,
         )
 
         return stripe_charge

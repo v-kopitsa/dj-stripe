@@ -17,7 +17,9 @@ from rest_framework.views import APIView
 from stripe.error import InvalidRequestError
 
 from ...models import Customer
-from ...settings import subscriber_request_callback, CANCELLATION_AT_PERIOD_END
+from ...settings import (
+    subscriber_request_callback, CANCELLATION_AT_PERIOD_END, STRIPE_SECRET_KEY
+)
 from .serializers import (
     SubscriptionSerializer, CreateSubscriptionSerializer,
     CreateChargeSerializer, DeleteSubscriptionSerializer
@@ -53,6 +55,8 @@ class SubscriptionRestView(APIView):
         serializer = CreateSubscriptionSerializer(data=request.data)
 
         if serializer.is_valid():
+            api_key = serializer.data.get(
+                "api_key", STRIPE_SECRET_KEY)
             try:
                 customer, _created = Customer.get_or_create(
                     subscriber=subscriber_request_callback(self.request)
@@ -60,8 +64,9 @@ class SubscriptionRestView(APIView):
                 customer.add_card(serializer.data["stripe_token"])
                 customer.subscribe(
                     serializer.data["plan"],
-                    serializer.data["account"],
-                    serializer.data.get("charge_immediately", True)
+                    serializer.data.get("account", None),
+                    serializer.data.get("charge_immediately", True),
+                    api_key=api_key
                 )
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             except InvalidRequestError as e:
@@ -125,7 +130,9 @@ class ChargeRestView(APIView):
                     subscriber=subscriber_request_callback(self.request)
                 )
                 customer.add_card(serializer.data["stripe_token"])
-                customer.charge(serializer.data["amount"])
+                customer.charge(
+                    serializer.data["amount"],
+                    api_key=serializer.data.get("api_key", STRIPE_SECRET_KEY))
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             except:
                 # TODO: Improve error messages
