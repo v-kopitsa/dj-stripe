@@ -10,6 +10,7 @@
 
 from __future__ import unicode_literals
 
+from decimal import Decimal
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -131,7 +132,7 @@ class ChargeRestView(APIView):
                 )
                 customer.add_card(serializer.data["stripe_token"])
                 customer.charge(
-                    serializer.data["amount"],
+                    Decimal(serializer.data["amount"]),
                     api_key=serializer.data.get("api_key", STRIPE_SECRET_KEY))
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             except:

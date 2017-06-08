@@ -1126,11 +1126,13 @@ enabled yet to make live charges. (Source: https://stripe.com/docs/api#account)
     )
     legal_entity = StripeJSONField(
         blank=True,
+        null=True,
         help_text="Information regarding the owner of this account, including "
                   "verification status."
     )
     external_accounts = StripeJSONField(
         blank=True,
+        null=True,
         help_text="External accounts (bank accounts and/or cards) currently "
                   "attached to this account."
     )
@@ -1179,6 +1181,25 @@ enabled yet to make live charges. (Source: https://stripe.com/docs/api#account)
             api_key=djstripe_settings.STRIPE_SECRET_KEY)
 
         return cls._get_or_create_from_stripe_object(account_data)[0]
+
+    @classmethod
+    def _manipulate_stripe_object_hook(cls, data):
+        if "currency" not in data:
+            data["currency"] = data["default_currency"]
+        if "legal_entity" not in data:
+            data["legal_entity"] = None
+        if "external_accounts" not in data:
+            data["external_accounts"] = None
+        if not data["display_name"]:
+            data["display_name"] = "default"
+        if "public_key" not in data:
+            data["public_key"] = djstripe_settings.STRIPE_PUBLIC_KEY
+
+        private_key = data["private_key"] if "private_key" in data else djstripe_settings.STRIPE_SECRET_KEY
+        cls.add_private_key(cls, private_key)
+        data["_private_key"] = cls._private_key
+
+        return data
 
 
 # ============================================================================ #
