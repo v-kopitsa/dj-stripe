@@ -73,7 +73,7 @@ def run_test_suite(args):
             "tests",
             "tests.apps.testapp"
         ],
-        MIDDLEWARE_CLASSES=(
+        MIDDLEWARE=(
             "django.contrib.sessions.middleware.SessionMiddleware",
             "django.contrib.auth.middleware.AuthenticationMiddleware",
             "django.contrib.messages.middleware.MessageMiddleware"
@@ -130,35 +130,13 @@ def run_test_suite(args):
                 "interval": "month"
             }
         },
-        DJSTRIPE_PLAN_HIERARCHY={
-            "bronze": {
-                "level": 1,
-                "plans": [
-                    "test0",
-                    "test",
-                ]
-            },
-            "silver": {
-                "level": 2,
-                "plans": [
-                    "test2",
-                    "test_deletion",
-                ]
-            },
-            "gold": {
-                "level": 3,
-                "plans": [
-                    "test_trial",
-                    "unidentified_test_plan",
-                ]
-            },
-        },
         DJSTRIPE_SUBSCRIPTION_REQUIRED_EXCEPTION_URLS=(
             "(admin)",
             "test_url_name",
             "testapp_namespaced:test_url_namespaced",
             "fn:/test_fnmatch*"
         ),
+        DJSTRIPE_USE_NATIVE_JSONFIELD=os.environ.get("USE_NATIVE_JSONFIELD", "") == "1",
     )
 
     # Avoid AppRegistryNotReady exception

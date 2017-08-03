@@ -14,9 +14,9 @@ import logging
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout, REDIRECT_FIELD_NAME
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.urlresolvers import reverse_lazy
 from django.http import HttpResponse
 from django.shortcuts import redirect
+from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
 from django.utils.encoding import smart_str
 from django.utils.http import is_safe_url
@@ -24,6 +24,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import FormView, TemplateView, View
 
 from . import settings as djstripe_settings
+from .enums import SubscriptionStatus
 from .forms import CancelSubscriptionForm
 from .mixins import SubscriptionMixin
 from .models import Customer, Event, EventProcessingException
@@ -80,7 +81,7 @@ class CancelSubscriptionView(LoginRequiredMixin, SubscriptionMixin, FormView):
 
         subscription = customer.subscription.cancel()
 
-        if subscription.status == subscription.STATUS_CANCELED:
+        if subscription.status == SubscriptionStatus.canceled:
             return self.status_cancel()
         else:
             # If pro-rate, they get some time to stay.
@@ -129,7 +130,7 @@ class WebHook(View):
                 traceback=""
             )
         else:
-            event = Event._create_from_stripe_object(data)
+            event = Event._create_from_stripe_object(data, save=False)
             event.validate()
 
             if djstripe_settings.WEBHOOK_EVENT_CALLBACK:

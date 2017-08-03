@@ -27,14 +27,15 @@ from django.utils import six, timezone
 from django.utils.encoding import python_2_unicode_compatible, smart_text
 from django.utils.functional import cached_property
 from doc_inherit import class_doc_inherit
-from mock_django.query import QuerySetMock
 from stripe.error import StripeError, InvalidRequestError
 
 import traceback as exception_traceback
 
 from . import settings as djstripe_settings
 from . import webhooks
+from .enums import SourceType, SubscriptionStatus
 from .exceptions import MultipleSubscriptionException
+from .fields import StripeDateTimeField
 from .managers import SubscriptionManager, ChargeManager, TransferManager
 from .signals import WEBHOOK_SIGNALS, webhook_processing_error
 from .stripe_objects import (
@@ -42,7 +43,7 @@ from .stripe_objects import (
     StripeEvent, StripeInvoice, StripeInvoiceItem, StripePlan, StripeSource,
     StripeSubscription, StripeTransfer
 )
-from .utils import get_friendly_currency_amount
+from .utils import get_friendly_currency_amount, QuerySetMock
 
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ class Charge(StripeCharge):
             self.account = Account.get_default_account()
 
         # TODO: other sources
-        if self.source_type == "card":
+        if self.source_type == SourceType.card:
             self.source = cls._stripe_object_to_source(target_cls=Card, data=data)
 
 
@@ -158,6 +159,16 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
     )
     date_purged = DateTimeField(null=True, editable=False)
 
+    coupon = ForeignKey(Coupon, null=True, on_delete=SET_NULL)
+    coupon_start = StripeDateTimeField(
+        null=True, editable=False, stripe_name="discount.start", stripe_required=False,
+        help_text="If a coupon is present, the date at which it was applied."
+    )
+    coupon_end = StripeDateTimeField(
+        null=True, editable=False, stripe_name="discount.end", stripe_required=False,
+        help_text="If a coupon is present and has a limited duration, the date that the discount will end."
+    )
+
     djstripe_subscriber_key = "djstripe_subscriber"
 
     class Meta:
@@ -197,10 +208,6 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
 
     @classmethod
     def create(cls, subscriber, idempotency_key=None):
-        trial_days = None
-        if djstripe_settings.trial_period_for_subscriber_callback:
-            trial_days = djstripe_settings.trial_period_for_subscriber_callback(subscriber)
-
         stripe_customer = cls._api_create(
             email=subscriber.email,
             idempotency_key=idempotency_key,
@@ -210,12 +217,6 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
             stripe_id=stripe_customer["id"],
             defaults={"subscriber": subscriber, "livemode": stripe_customer["livemode"]}
         )
-
-        if djstripe_settings.DEFAULT_PLAN and trial_days:
-            customer.subscribe(
-                plan=djstripe_settings.DEFAULT_PLAN,
-                trial_end=timezone.now() + timezone.timedelta(days=trial_days)
-            )
 
         return customer
 
@@ -304,13 +305,13 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
     def active_subscriptions(self):
         """Returns active subscriptions (subscriptions with an active status that end in the future)."""
         return self.subscriptions.filter(
-            status=StripeSubscription.STATUS_ACTIVE, current_period_end__gt=timezone.now()
+            status=SubscriptionStatus.active, current_period_end__gt=timezone.now()
         )
 
     @property
     def valid_subscriptions(self):
         """Returns this cusotmer's valid subscriptions (subscriptions that aren't cancelled."""
-        return self.subscriptions.exclude(status=StripeSubscription.STATUS_CANCELED)
+        return self.subscriptions.exclude(status=SubscriptionStatus.canceled)
 
     @property
     def subscription(self):
@@ -412,6 +413,20 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
 
         return new_card
 
+    def add_coupon(self, coupon):
+        """
+        Add a coupon to a Customer.
+
+        The coupon can be a Coupon object, or a valid Stripe Coupon ID.
+        """
+        if isinstance(coupon, Coupon):
+            coupon = coupon.stripe_id
+
+        stripe_customer = self.api_retrieve()
+        stripe_customer.coupon = coupon
+        stripe_customer.save()
+        return self.__class__.sync_from_stripe_data(stripe_customer)
+
     def upcoming_invoice(self, **kwargs):
         """ Gets the upcoming preview invoice (singular) for this customer.
 
@@ -423,20 +438,42 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
         kwargs['customer'] = self
         return Invoice.upcoming(**kwargs)
 
-    def _attach_objects_post_save_hook(self, cls, data):
-        default_source = data.get("default_source")
+    def _attach_objects_post_save_hook(self, cls, data):  # noqa (function complexity)
+        save = False
 
+        # Have to create sources before we handle the default_source
+        if data["sources"]:
+            for source in data["sources"]["data"]:
+                if not isinstance(source, dict) or source.get("object") == SourceType.card:
+                    Card._get_or_create_from_stripe_object(source)
+                else:
+                    logger.warning("Unsupported source type on %r: %r", self, source)
+
+        default_source = data.get("default_source")
         if default_source:
             # TODO: other sources
-            if not isinstance(default_source, dict) or default_source.get("object") == "card":
+            if not isinstance(default_source, dict) or default_source.get("object") == SourceType.card:
                 source, created = Card._get_or_create_from_stripe_object(data, "default_source", refetch=False)
             else:
-                logger.warn("Unsupported source type on %r: %r", self, default_source)
+                logger.warning("Unsupported source type on %r: %r", self, default_source)
                 source = None
 
             if source and source != self.default_source:
                 self.default_source = source
-                self.save()
+                save = True
+
+        discount = data.get("discount")
+        if discount:
+            coupon, _created = Coupon._get_or_create_from_stripe_object(discount, "coupon")
+            if coupon and coupon != self.coupon:
+                self.coupon = coupon
+                save = True
+        elif self.coupon:
+            self.coupon = None
+            save = True
+
+        if save:
+            self.save()
 
     def _attach_objects_hook(self, cls, data):
         # When we save a customer to Stripe, we add a reference to its Django PK
@@ -450,7 +487,7 @@ Use ``Customer.sources`` and ``Customer.subscriptions`` to access them.
                 # Attempting to save that would cause an IntegrityError.
                 self.subscriber = cls.objects.get(pk=subscriber_id)
             except (cls.DoesNotExist, ValueError):
-                logger.warn("Could not find subscriber %r matching customer %r" % (subscriber_id, self.stripe_id))
+                logger.warning("Could not find subscriber %r matching customer %r", subscriber_id, self.stripe_id)
                 self.subscriber = None
 
     # SYNC methods should be dropped in favor of the master sync infrastructure proposed
@@ -500,6 +537,14 @@ class Event(StripeEvent):
         """ The event's data if the event is valid, None otherwise."""
 
         return self.webhook_message if self.valid else None
+
+    def _attach_objects_hook(self, cls, data):
+        if self.received_api_version is None:
+            # as of api version 2017-02-14, the account.application.deauthorized
+            # event sends None as api_version.
+            # If we receive that, store an empty string instead.
+            # Remove this hack if this gets fixed upstream.
+            self.received_api_version = ""
 
     def validate(self):
         """
@@ -808,7 +853,7 @@ class UpcomingInvoice(Invoice):
         will act like a normal queryset, but mutation will silently fail.
         """
 
-        return QuerySetMock(InvoiceItem, *self._invoiceitems)
+        return QuerySetMock.from_iterable(InvoiceItem, self._invoiceitems)
 
     @property
     def stripe_id(self):
