@@ -2,7 +2,7 @@
 
 import os
 import sys
-from setuptools import setup
+from distutils.core import setup
 
 
 if sys.argv[-1] == 'publish':
